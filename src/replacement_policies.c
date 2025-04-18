@@ -1,129 +1,151 @@
-//
-// This file contains all of the implementations of the replacement_policy
-// constructors from the replacement_policies.h file.
-//
-// It also contains stubs of all of the functions that are added to each
-// replacement_policy struct at construction time.
-//
-// ============================================================================
-// NOTE: It is recommended that you read the comments in the
-// replacement_policies.h file for further context on what each function is
-// for.
-// ============================================================================
-//
-
 #include "replacement_policies.h"
+#include "memory_system.h"
+#include <stdlib.h>
+#include <stdint.h>
+#include <limits.h>
+
+// Data struct for LRU and LRU_PREFER_CLEAN policies
+typedef struct {
+    uint32_t sets;
+    uint32_t assoc;
+    uint64_t *timestamps;
+    uint64_t counter;
+} lru_data;
 
 // LRU Replacement Policy
-// ============================================================================
-// TODO feel free to create additional structs/enums as necessary
-
-void lru_cache_access(struct replacement_policy *replacement_policy,
-                      struct cache_system *cache_system, uint32_t set_idx, uint32_t tag)
+void lru_cache_access(struct replacement_policy *rp, struct cache_system *cs, uint32_t set_idx,
+                      uint32_t tag)
 {
-    // TODO update the LRU replacement policy state given a new memory access
+    lru_data *d = (lru_data *)rp->data;
+    d->counter++;
+    uint32_t assoc = d->assoc;
+    uint32_t start = set_idx * assoc;
+    for (uint32_t i = 0; i < assoc; i++) {
+        struct cache_line *cl = &cs->cache_lines[start + i];
+        if (cl->tag == tag && cl->status != INVALID) {
+            d->timestamps[start + i] = d->counter;
+            break;
+        }
+    }
 }
 
-uint32_t lru_eviction_index(struct replacement_policy *replacement_policy,
-                            struct cache_system *cache_system, uint32_t set_idx)
+uint32_t lru_eviction_index(struct replacement_policy *rp, struct cache_system *cs, uint32_t set_idx)
 {
-    // TODO return the index within the set that should be evicted.
-
-    return 0;
+    lru_data *d = (lru_data *)rp->data;
+    uint32_t assoc = d->assoc;
+    uint32_t start = set_idx * assoc;
+    uint64_t min_ts = UINT64_MAX;
+    uint32_t evict = 0;
+    for (uint32_t i = 0; i < assoc; i++) {
+        if (d->timestamps[start + i] < min_ts) {
+            min_ts = d->timestamps[start + i];
+            evict = i;
+        }
+    }
+    return evict;
 }
 
-void lru_replacement_policy_cleanup(struct replacement_policy *replacement_policy)
+void lru_replacement_policy_cleanup(struct replacement_policy *rp)
 {
-    // TODO cleanup any additional memory that you allocated in the
-    // lru_replacement_policy_new function.
+    lru_data *d = (lru_data *)rp->data;
+    free(d->timestamps);
+    free(d);
 }
 
 struct replacement_policy *lru_replacement_policy_new(uint32_t sets, uint32_t associativity)
 {
-    struct replacement_policy *lru_rp = calloc(1, sizeof(struct replacement_policy));
-    lru_rp->cache_access = &lru_cache_access;
-    lru_rp->eviction_index = &lru_eviction_index;
-    lru_rp->cleanup = &lru_replacement_policy_cleanup;
+    struct replacement_policy *rp = calloc(1, sizeof(struct replacement_policy));
+    rp->cache_access = &lru_cache_access;
+    rp->eviction_index = &lru_eviction_index;
+    rp->cleanup = &lru_replacement_policy_cleanup;
 
-    // TODO allocate any additional memory to store metadata here and assign to
-    // lru_rp->data.
-
-    return lru_rp;
+    lru_data *d = malloc(sizeof(lru_data));
+    d->sets = sets;
+    d->assoc = associativity;
+    d->counter = 0;
+    d->timestamps = calloc(sets * associativity, sizeof(uint64_t));
+    rp->data = d;
+    return rp;
 }
 
 // RAND Replacement Policy
-// ============================================================================
-void rand_cache_access(struct replacement_policy *replacement_policy,
-                       struct cache_system *cache_system, uint32_t set_idx, uint32_t tag)
+void rand_cache_access(struct replacement_policy *rp, struct cache_system *cs, uint32_t set_idx,
+                       uint32_t tag)
 {
-    // TODO update the RAND replacement policy state given a new memory access
+    // No state to track
 }
 
-uint32_t rand_eviction_index(struct replacement_policy *replacement_policy,
-                             struct cache_system *cache_system, uint32_t set_idx)
+uint32_t rand_eviction_index(struct replacement_policy *rp, struct cache_system *cs, uint32_t set_idx)
 {
-    // TODO return the index within the set that should be evicted.
-
-    return 0;
+    return rand() % cs->associativity;
 }
 
-void rand_replacement_policy_cleanup(struct replacement_policy *replacement_policy)
+void rand_replacement_policy_cleanup(struct replacement_policy *rp)
 {
-    // TODO cleanup any additional memory that you allocated in the
-    // rand_replacement_policy_new function.
+    // Nothing to cleanup
 }
 
 struct replacement_policy *rand_replacement_policy_new(uint32_t sets, uint32_t associativity)
 {
-    // Seed randomness
     srand(time(NULL));
-
-    struct replacement_policy *rand_rp = malloc(sizeof(struct replacement_policy));
-    rand_rp->cache_access = &rand_cache_access;
-    rand_rp->eviction_index = &rand_eviction_index;
-    rand_rp->cleanup = &rand_replacement_policy_cleanup;
-
-    // TODO allocate any additional memory to store metadata here and assign to
-    // rand_rp->data.
-
-    return rand_rp;
+    struct replacement_policy *rp = calloc(1, sizeof(struct replacement_policy));
+    rp->cache_access = &rand_cache_access;
+    rp->eviction_index = &rand_eviction_index;
+    rp->cleanup = &rand_replacement_policy_cleanup;
+    rp->data = NULL;
+    return rp;
 }
 
 // LRU_PREFER_CLEAN Replacement Policy
-// ============================================================================
-void lru_prefer_clean_cache_access(struct replacement_policy *replacement_policy,
-                                   struct cache_system *cache_system, uint32_t set_idx,
-                                   uint32_t tag)
+void lru_prefer_clean_cache_access(struct replacement_policy *rp, struct cache_system *cs,
+                                   uint32_t set_idx, uint32_t tag)
 {
-    // TODO update the LRU_PREFER_CLEAN replacement policy state given a new
-    // memory access
-    // NOTE: you may be able to share code with the LRU policy
+    // Same as LRU
+    lru_cache_access(rp, cs, set_idx, tag);
 }
 
-uint32_t lru_prefer_clean_eviction_index(struct replacement_policy *replacement_policy,
-                                         struct cache_system *cache_system, uint32_t set_idx)
+uint32_t lru_prefer_clean_eviction_index(struct replacement_policy *rp, struct cache_system *cs,
+                                         uint32_t set_idx)
 {
-    // TODO return the index within the set that should be evicted.
-
-    return 0;
+    lru_data *d = (lru_data *)rp->data;
+    uint32_t assoc = d->assoc;
+    uint32_t start = set_idx * assoc;
+    uint64_t min_clean_ts = UINT64_MAX;
+    int clean_idx = -1;
+    // First prefer clean lines
+    for (uint32_t i = 0; i < assoc; i++) {
+        struct cache_line *cl = &cs->cache_lines[start + i];
+        if (cl->status != MODIFIED && d->timestamps[start + i] < min_clean_ts) {
+            min_clean_ts = d->timestamps[start + i];
+            clean_idx = i;
+        }
+    }
+    if (clean_idx >= 0) {
+        return (uint32_t)clean_idx;
+    }
+    // Fallback: evict LRU among all
+    uint64_t min_ts = UINT64_MAX;
+    uint32_t evict = 0;
+    for (uint32_t i = 0; i < assoc; i++) {
+        if (d->timestamps[start + i] < min_ts) {
+            min_ts = d->timestamps[start + i];
+            evict = i;
+        }
+    }
+    return evict;
 }
 
-void lru_prefer_clean_replacement_policy_cleanup(struct replacement_policy *replacement_policy)
+void lru_prefer_clean_replacement_policy_cleanup(struct replacement_policy *rp)
 {
-    // TODO cleanup any additional memory that you allocated in the
-    // lru_prefer_clean_replacement_policy_new function.
+    lru_replacement_policy_cleanup(rp);
 }
 
 struct replacement_policy *lru_prefer_clean_replacement_policy_new(uint32_t sets,
                                                                    uint32_t associativity)
 {
-    struct replacement_policy *lru_prefer_clean_rp = malloc(sizeof(struct replacement_policy));
-    lru_prefer_clean_rp->cache_access = &lru_prefer_clean_cache_access;
-    lru_prefer_clean_rp->eviction_index = &lru_prefer_clean_eviction_index;
-    lru_prefer_clean_rp->cleanup = &lru_prefer_clean_replacement_policy_cleanup;
-
-    // TODO allocate any additional memory to store metadata here and assign to
-    // lru_prefer_clean_rp->data.
-
-    return lru_prefer_clean_rp;
+    struct replacement_policy *rp = lru_replacement_policy_new(sets, associativity);
+    rp->cache_access = &lru_prefer_clean_cache_access;
+    rp->eviction_index = &lru_prefer_clean_eviction_index;
+    rp->cleanup = &lru_prefer_clean_replacement_policy_cleanup;
+    return rp;
 }
